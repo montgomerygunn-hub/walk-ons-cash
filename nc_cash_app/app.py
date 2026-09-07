@@ -218,17 +218,24 @@ def get_account(account_id):
     return row
 
 
-def get_selected_account_id():
-    accounts = get_accounts()
-    if not accounts:
-        return None
-    requested = request.args.get("account_id", type=int) or session.get("account_id")
-    valid_ids = [a["id"] for a in accounts]
-    if requested in valid_ids:
-        session["account_id"] = requested
-        return requested
-    session["account_id"] = accounts[0]["id"]
-    return accounts[0]["id"]
+def get_all_account_balances():
+    conn = get_db()
+    accounts = conn.execute("SELECT * FROM accounts ORDER BY name COLLATE NOCASE ASC").fetchall()
+    results = []
+    for a in accounts:
+        total = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) s FROM transactions WHERE account_id=?",
+            (a["id"],),
+        ).fetchone()["s"]
+        results.append({
+            "id": a["id"],
+            "name": a["name"],
+            "last4": a["last4"],
+            "as_of_date": a["as_of_date"],
+            "balance": a["starting_balance"] + total,
+        })
+    conn.close()
+    return results
 
 
 def account_balance(account_id):
@@ -392,13 +399,22 @@ def build_excel(account_id):
 # ---------------------------------------------------------------------------
 
 @app.route("/", methods=["GET"])
-def index():
-    accounts = get_accounts()
+def dashboard():
+    accounts = get_all_account_balances()
     if not accounts:
         return redirect(url_for("manage_accounts"))
+    return render_template("dashboard.html", accounts=accounts)
 
-    account_id = get_selected_account_id()
+
+@app.route("/account/<int:account_id>", methods=["GET"])
+def account_page(account_id):
     acct = get_account(account_id)
+    if not acct:
+        flash("Account not found.", "error")
+        return redirect(url_for("dashboard"))
+
+    session["account_id"] = account_id
+    accounts = get_accounts()
 
     conn = get_db()
     rows = conn.execute(
@@ -422,7 +438,7 @@ def upload():
     f = request.files.get("qbo_file")
     if not f or f.filename == "":
         flash("No file selected.", "error")
-        return redirect(url_for("index"))
+        return redirect(url_for("dashboard"))
 
     data = parse_qbo(f.read())
     acctid = data.get("acctid") or ""
@@ -437,7 +453,7 @@ def upload():
             f"isn't set up yet. Add it under Manage Accounts first, then re-upload.",
             "error",
         )
-        return redirect(url_for("index"))
+        return redirect(url_for("dashboard"))
 
     acct = matches[0]
     as_of_date = acct["as_of_date"]
@@ -468,7 +484,7 @@ def upload():
         msg += f", skipped {historical_skipped} dated on/before the {as_of_date} starting balance"
     msg += "."
     flash(msg, "success" if inserted else "info")
-    return redirect(url_for("index", account_id=acct["id"]))
+    return redirect(url_for("account_page", account_id=acct["id"]))
 
 
 @app.route("/add", methods=["POST"])
@@ -482,14 +498,14 @@ def add_transaction():
 
     if not account_id or not get_account(account_id):
         flash("Select a valid account first.", "error")
-        return redirect(url_for("index"))
+        return redirect(url_for("dashboard"))
 
     try:
         amount_val = float(amount)
         datetime.strptime(txn_date, "%Y-%m-%d")
     except (ValueError, TypeError):
         flash("Please provide a valid date and numeric amount.", "error")
-        return redirect(url_for("index", account_id=account_id))
+        return redirect(url_for("account_page", account_id=account_id))
 
     conn = get_db()
     conn.execute(
@@ -500,7 +516,7 @@ def add_transaction():
     conn.commit()
     conn.close()
     flash("Projected transaction added.", "success")
-    return redirect(url_for("index", account_id=account_id))
+    return redirect(url_for("account_page", account_id=account_id))
 
 
 @app.route("/delete/<int:txn_id>", methods=["POST"])
@@ -517,14 +533,14 @@ def delete_transaction(txn_id):
     else:
         flash("Only Projected rows can be deleted here.", "error")
     conn.close()
-    return redirect(url_for("index", account_id=account_id))
+    return redirect(url_for("account_page", account_id=account_id))
 
 
 @app.route("/download/<int:account_id>")
 def download(account_id):
     if not get_account(account_id):
         flash("Account not found.", "error")
-        return redirect(url_for("index"))
+        return redirect(url_for("dashboard"))
     buf, account_name = build_excel(account_id)
     filename = f"{account_name.replace(' ', '_')}_Cash_Tracker.xlsx"
     return send_file(
@@ -568,7 +584,7 @@ def create_account():
     conn.close()
     session["account_id"] = new_id
     flash(f"Account '{name}' added.", "success")
-    return redirect(url_for("index", account_id=new_id))
+    return redirect(url_for("account_page", account_id=new_id))
 
 
 @app.route("/accounts/<int:account_id>/update", methods=["POST"])
