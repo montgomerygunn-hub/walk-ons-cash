@@ -4,6 +4,7 @@ Upload a .qbo file per account, it auto-detects the account by its bank
 account number, parses + dedupes transactions into SQLite, and lets you
 download an always-current Excel export per account.
 """
+import hmac
 import io
 import os
 import re
@@ -11,7 +12,8 @@ import sqlite3
 from datetime import datetime
 
 from flask import (
-    Flask, request, render_template, send_file, redirect, url_for, flash, session
+    Flask, request, render_template, send_file, redirect, url_for, flash,
+    session, Response
 )
 
 import openpyxl
@@ -29,6 +31,38 @@ CATEGORIES = ["Sales", "COGS", "Payroll", "Vendor/AP", "Construction/CapEx",
               "Transfer", "Financing", "Fees", "Other"]
 
 SCHEMA_VERSION = "2"
+
+# ---------------------------------------------------------------------------
+# Password protection (HTTP Basic Auth over the whole app)
+# ---------------------------------------------------------------------------
+# Credentials come from environment variables set on Render -- never hardcode
+# them here or commit them to GitHub. If APP_PASSWORD isn't set, the app
+# fails CLOSED (blocks everyone) rather than silently staying open.
+APP_USERNAME = os.environ.get("APP_USERNAME", "")
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
+
+
+def _check_credentials(username, password):
+    if not APP_USERNAME or not APP_PASSWORD:
+        return False
+    user_ok = hmac.compare_digest(username or "", APP_USERNAME)
+    pass_ok = hmac.compare_digest(password or "", APP_PASSWORD)
+    return user_ok and pass_ok
+
+
+def _auth_challenge():
+    return Response(
+        "Authentication required.", 401,
+        {"WWW-Authenticate": "Basic realm=\"Walk-On's Cash Tracker\""},
+    )
+
+
+@app.before_request
+def require_login():
+    auth = request.authorization
+    if not auth or not _check_credentials(auth.username, auth.password):
+        return _auth_challenge()
+
 
 # ---------------------------------------------------------------------------
 # Database
