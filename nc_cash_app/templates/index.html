@@ -44,13 +44,14 @@
     <h1>{{ current_account.name }} — Cash Tracker</h1>
     <div class="sub">Account ending {{ current_account.last4 }} · Seeded as of {{ current_account.as_of_date }}</div>
   </div>
-  <form method="get" action="/">
-    <select name="account_id" onchange="this.form.submit()">
-      {% for a in accounts %}
-      <option value="{{ a.id }}" {% if a.id == current_account.id %}selected{% endif %}>{{ a.name }}</option>
-      {% endfor %}
-    </select>
-  </form>
+  <div>
+    <a href="/" style="color: white; font-size: 13px; opacity: 0.85; text-decoration: none;">&larr; All Accounts</a>
+  </div>
+  <select name="account_id" onchange="window.location.href = '/account/' + this.value">
+    {% for a in accounts %}
+    <option value="{{ a.id }}" {% if a.id == current_account.id %}selected{% endif %}>{{ a.name }}</option>
+    {% endfor %}
+  </select>
 </header>
 <div class="wrap">
 
@@ -151,3 +152,4 @@
 </div>
 </body>
 </html>
+
