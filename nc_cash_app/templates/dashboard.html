@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Walk-On's Cash Tracker</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --blue: #1F4E78; }
+  body { font-family: Arial, Helvetica, sans-serif; margin: 0; background: #f4f6f8; color: #222; }
+  header { background: var(--blue); color: white; padding: 20px 24px; }
+  header h1 { margin: 0; font-size: 20px; }
+  .wrap { max-width: 800px; margin: 0 auto; padding: 24px; }
+  .flash { padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 14px; }
+  .flash.success { background: #E2EFDA; color: #275; }
+  .flash.error { background: #FADBD8; color: #922; }
+  .flash.info { background: #D6EAF8; color: #245; }
+  .acct-card {
+    background: white; border-radius: 8px; padding: 18px 22px; margin-bottom: 14px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08); display: flex; justify-content: space-between;
+    align-items: center; text-decoration: none; color: inherit; transition: box-shadow 0.15s;
+  }
+  .acct-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+  .acct-name { font-size: 17px; font-weight: bold; color: var(--blue); }
+  .acct-sub { font-size: 12px; color: #777; margin-top: 2px; }
+  .acct-balance { font-size: 22px; font-weight: bold; }
+  .acct-balance.neg { color: #922; }
+  .manage-link { display: inline-block; margin-top: 10px; font-size: 13px; color: var(--blue); }
+  .total-card {
+    background: var(--blue); color: white; border-radius: 8px; padding: 18px 22px;
+    margin-bottom: 22px; display: flex; justify-content: space-between; align-items: center;
+  }
+  .total-label { font-size: 13px; text-transform: uppercase; opacity: 0.85; }
+  .total-amount { font-size: 26px; font-weight: bold; }
+</style>
+</head>
+<body>
+<header><h1>Walk-On's Cash Tracker</h1></header>
+<div class="wrap">
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <div class="total-card">
+    <div>
+      <div class="total-label">Total Cash — All Accounts</div>
+    </div>
+    <div class="total-amount">${{ "%.2f"|format(accounts|sum(attribute='balance')) }}</div>
+  </div>
+
+  {% for a in accounts %}
+  <a class="acct-card" href="/account/{{ a.id }}">
+    <div>
+      <div class="acct-name">{{ a.name }}</div>
+      <div class="acct-sub">Ending {{ a.last4 }} · Seeded as of {{ a.as_of_date }}</div>
+    </div>
+    <div class="acct-balance {{ 'neg' if a.balance < 0 else '' }}">${{ "%.2f"|format(a.balance) }}</div>
+  </a>
+  {% endfor %}
+
+  <a class="manage-link" href="/accounts">Manage Accounts &rarr;</a>
+
+</div>
+</body>
+</html>
