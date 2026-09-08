@@ -30,7 +30,12 @@ app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 CATEGORIES = ["Sales", "COGS", "Payroll", "Vendor/AP", "Construction/CapEx",
               "Transfer", "Financing", "Fees", "Other"]
 
-SCHEMA_VERSION = "2"
+# When an uploaded bank transaction matches a still-open Projected transaction
+# on amount (exact) and falls within this many days of it, it gets flagged as
+# a possible match for the user to confirm rather than silently merged.
+MATCH_WINDOW_DAYS = 21
+
+SCHEMA_VERSION = "3"
 
 # ---------------------------------------------------------------------------
 # Password protection (HTTP Basic Auth over the whole app)
@@ -184,6 +189,12 @@ def init_db():
                  r["created_at"]),
             )
         conn.execute("DROP TABLE transactions_old")
+
+    if not _column_exists(conn, "transactions", "matched_projected_id"):
+        conn.execute(
+            "ALTER TABLE transactions ADD COLUMN matched_projected_id "
+            "INTEGER REFERENCES transactions(id)"
+        )
 
     if _table_exists(conn, "settings"):
         conn.execute("DROP TABLE settings")
@@ -431,9 +442,26 @@ def account_page(account_id):
         "SELECT * FROM transactions WHERE account_id=? ORDER BY txn_date DESC, id DESC LIMIT 100",
         (account_id,),
     ).fetchall()
+
+    match_ids = [r["matched_projected_id"] for r in display_rows if r["matched_projected_id"]]
+    match_lookup = {}
+    if match_ids:
+        placeholders = ",".join("?" for _ in match_ids)
+        for m in conn.execute(
+            f"SELECT id, txn_date, payee, description, amount FROM transactions "
+            f"WHERE id IN ({placeholders})",
+            match_ids,
+        ).fetchall():
+            match_lookup[m["id"]] = m
     conn.close()
 
-    rows = [dict(r, running_total=running_by_id[r["id"]]) for r in display_rows]
+    rows = []
+    for r in display_rows:
+        row = dict(r, running_total=running_by_id[r["id"]])
+        row["match_candidate"] = (
+            match_lookup.get(r["matched_projected_id"]) if r["matched_projected_id"] else None
+        )
+        rows.append(row)
 
     return render_template(
         "index.html",
@@ -471,19 +499,39 @@ def upload():
     as_of_date = acct["as_of_date"]
 
     conn = get_db()
-    inserted, dup_skipped, historical_skipped = 0, 0, 0
+    inserted, dup_skipped, historical_skipped, matched = 0, 0, 0, 0
     for t in data["transactions"]:
         if t["date"] <= as_of_date:
             historical_skipped += 1
             continue
         try:
-            conn.execute(
+            cur = conn.execute(
                 "INSERT INTO transactions (account_id, txn_date, txn_type, payee, "
                 "description, category, amount, bank_id) "
                 "VALUES (?, ?, 'Actual', ?, ?, ?, ?, ?)",
                 (acct["id"], t["date"], t["name"], t["memo"], "", t["amount"], t["fitid"]),
             )
             inserted += 1
+            new_id = cur.lastrowid
+
+            # Flag a possible match against a still-open Projected transaction:
+            # same account, exact amount, within MATCH_WINDOW_DAYS of this
+            # transaction's date, and not already claimed by another match.
+            candidate = conn.execute(
+                "SELECT id FROM transactions "
+                "WHERE account_id=? AND txn_type='Projected' AND amount=? "
+                "AND id NOT IN (SELECT matched_projected_id FROM transactions "
+                "WHERE matched_projected_id IS NOT NULL) "
+                "AND ABS(JULIANDAY(txn_date) - JULIANDAY(?)) <= ? "
+                "ORDER BY ABS(JULIANDAY(txn_date) - JULIANDAY(?)) ASC LIMIT 1",
+                (acct["id"], t["amount"], t["date"], MATCH_WINDOW_DAYS, t["date"]),
+            ).fetchone()
+            if candidate:
+                conn.execute(
+                    "UPDATE transactions SET matched_projected_id=? WHERE id=?",
+                    (candidate["id"], new_id),
+                )
+                matched += 1
         except sqlite3.IntegrityError:
             dup_skipped += 1
     conn.commit()
@@ -492,6 +540,8 @@ def upload():
     session["account_id"] = acct["id"]
     msg = (f"Matched account '{acct['name']}' (ending {found_last4}). "
            f"Imported {inserted} new transaction(s), skipped {dup_skipped} duplicate(s)")
+    if matched:
+        msg += f", flagged {matched} possible match{'es' if matched != 1 else ''} with projected transactions for you to confirm"
     if historical_skipped:
         msg += f", skipped {historical_skipped} dated on/before the {as_of_date} starting balance"
     msg += "."
@@ -545,6 +595,48 @@ def delete_transaction(txn_id):
     else:
         flash("Only Projected rows can be deleted here.", "error")
     conn.close()
+    return redirect(url_for("account_page", account_id=account_id))
+
+
+@app.route("/match/<int:txn_id>/confirm", methods=["POST"])
+def confirm_match(txn_id):
+    conn = get_db()
+    row = conn.execute(
+        "SELECT account_id, matched_projected_id FROM transactions WHERE id=?",
+        (txn_id,),
+    ).fetchone()
+    if not row or not row["matched_projected_id"]:
+        flash("No pending match found for that transaction.", "error")
+        conn.close()
+        return redirect(url_for("dashboard"))
+
+    account_id = row["account_id"]
+    # Clear the reference before deleting the projected row it points to,
+    # since matched_projected_id is a foreign key back into this same table.
+    conn.execute("UPDATE transactions SET matched_projected_id=NULL WHERE id=?", (txn_id,))
+    conn.execute("DELETE FROM transactions WHERE id=?", (row["matched_projected_id"],))
+    conn.commit()
+    conn.close()
+    flash("Match confirmed — the projected transaction was removed.", "success")
+    return redirect(url_for("account_page", account_id=account_id))
+
+
+@app.route("/match/<int:txn_id>/dismiss", methods=["POST"])
+def dismiss_match(txn_id):
+    conn = get_db()
+    row = conn.execute(
+        "SELECT account_id FROM transactions WHERE id=?", (txn_id,)
+    ).fetchone()
+    if not row:
+        flash("Transaction not found.", "error")
+        conn.close()
+        return redirect(url_for("dashboard"))
+
+    account_id = row["account_id"]
+    conn.execute("UPDATE transactions SET matched_projected_id=NULL WHERE id=?", (txn_id,))
+    conn.commit()
+    conn.close()
+    flash("Dismissed — no changes made.", "info")
     return redirect(url_for("account_page", account_id=account_id))
 
 
