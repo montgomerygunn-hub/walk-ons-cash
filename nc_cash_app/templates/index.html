@@ -24,6 +24,9 @@
   th { background: #f0f2f4; font-size: 11px; text-transform: uppercase; color: #555; }
   tr.Actual { background: var(--green); }
   tr.Projected { background: var(--yellow); }
+  tr.match-flag td { background: #FCE9D6; padding: 6px 10px; font-size: 12px; }
+  .match-badge { background: #E67E22; color: white; padding: 2px 8px; border-radius: 4px; font-size: 10px; text-transform: uppercase; margin-right: 8px; }
+  tr.match-flag form { margin-left: 6px; }
   .amt-neg { color: #922; }
   form.inline { display: inline; }
   .btn { background: var(--blue); color: white; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; text-decoration: none; display: inline-block; }
@@ -145,6 +148,22 @@
             {% endif %}
           </td>
         </tr>
+        {% if r.match_candidate %}
+        <tr class="match-flag">
+          <td colspan="8">
+            <span class="match-badge">Possible match</span>
+            Projected {{ r.match_candidate.txn_date }} &middot;
+            {{ r.match_candidate.payee or r.match_candidate.description or "(no note)" }} &middot;
+            ${{ "%.2f"|format(r.match_candidate.amount) }}
+            <form class="inline" action="/match/{{ r.id }}/confirm" method="post">
+              <button class="btn small" type="submit">Confirm match</button>
+            </form>
+            <form class="inline" action="/match/{{ r.id }}/dismiss" method="post">
+              <button class="btn small secondary" type="submit">Not a match</button>
+            </form>
+          </td>
+        </tr>
+        {% endif %}
         {% endfor %}
       </tbody>
     </table>
