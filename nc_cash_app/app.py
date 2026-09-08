@@ -417,11 +417,23 @@ def account_page(account_id):
     accounts = get_accounts()
 
     conn = get_db()
-    rows = conn.execute(
+    all_rows = conn.execute(
+        "SELECT id, amount FROM transactions WHERE account_id=? ORDER BY txn_date ASC, id ASC",
+        (account_id,),
+    ).fetchall()
+    running = acct["starting_balance"]
+    running_by_id = {}
+    for r in all_rows:
+        running += r["amount"]
+        running_by_id[r["id"]] = running
+
+    display_rows = conn.execute(
         "SELECT * FROM transactions WHERE account_id=? ORDER BY txn_date DESC, id DESC LIMIT 100",
         (account_id,),
     ).fetchall()
     conn.close()
+
+    rows = [dict(r, running_total=running_by_id[r["id"]]) for r in display_rows]
 
     return render_template(
         "index.html",
