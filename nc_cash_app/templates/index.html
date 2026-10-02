@@ -41,6 +41,8 @@
   a.manage-link { font-size: 13px; color: var(--blue); }
   .pager { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; color: #555; flex-wrap: wrap; }
   .pager .btn.disabled { background: #bbb; pointer-events: none; cursor: default; }
+  .view-bar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .proj-note { background: var(--yellow); border-radius: 6px; padding: 8px 12px; margin: 8px 0 12px; font-size: 13px; color: #5a4a00; }
 </style>
 </head>
 <body>
@@ -124,8 +126,23 @@
   </div>
 
   <div class="card">
-    <h3>Transactions — {{ current_account.name }}</h3>
+    <div class="view-bar">
+      <h3 style="margin:0;">{{ 'Projected Transactions' if view == 'projected' else 'Transactions' }} — {{ current_account.name }}</h3>
+      {% if view == 'projected' %}
+      <a class="btn small secondary" href="{{ url_for('account_page', account_id=current_account.id) }}">Show all transactions</a>
+      {% else %}
+      <a class="btn small" style="background:#B7950B;" href="{{ url_for('account_page', account_id=current_account.id, view='projected') }}">Show projected only ({{ projected_count }})</a>
+      {% endif %}
+    </div>
+    {% if view == 'projected' %}
+    <div class="proj-note">
+      {{ projected_count }} open projected transaction{{ '' if projected_count == 1 else 's' }}, oldest first &middot;
+      net {{ '-' if projected_total < 0 else '+' }}${{ "%.2f"|format(projected_total|abs) }} included in your balance.
+      Remove any you mis-keyed once the real transaction has posted.
+    </div>
+    {% endif %}
     {% macro pager() %}
+    {% if view != 'projected' %}
     <div class="pager">
       <a class="btn small secondary {{ 'disabled' if page <= 1 else '' }}"
          href="{{ url_for('account_page', account_id=current_account.id, page=page-1) if page > 1 else '#' }}">&larr; Newer</a>
@@ -133,6 +150,7 @@
       <a class="btn small secondary {{ 'disabled' if page >= total_pages else '' }}"
          href="{{ url_for('account_page', account_id=current_account.id, page=page+1) if page < total_pages else '#' }}">Older &rarr;</a>
     </div>
+    {% endif %}
     {% endmacro %}
     {{ pager() }}
     <table>
@@ -155,6 +173,7 @@
           <td>
             {% if r.txn_type == 'Projected' %}
             <form class="inline" action="/delete/{{ r.id }}" method="post" onsubmit="return confirm('Remove this projected transaction?');">
+              <input type="hidden" name="view" value="{{ view }}">
               <button class="btn small danger" type="submit">Remove</button>
             </form>
             {% endif %}

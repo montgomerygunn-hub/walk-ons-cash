@@ -443,16 +443,41 @@ def account_page(account_id):
         running_by_id[r["id"]] = running
 
     total_rows = len(all_rows)
-    total_pages = max(1, (total_rows + PER_PAGE - 1) // PER_PAGE)
-    page = request.args.get("page", 1, type=int) or 1
-    page = max(1, min(page, total_pages))
-    offset = (page - 1) * PER_PAGE
+    view = "projected" if request.args.get("view") == "projected" else "all"
 
-    display_rows = conn.execute(
-        "SELECT * FROM transactions WHERE account_id=? "
-        "ORDER BY txn_date DESC, id DESC LIMIT ? OFFSET ?",
-        (account_id, PER_PAGE, offset),
-    ).fetchall()
+    if view == "projected":
+        # Every still-open projected transaction, oldest first, no paging --
+        # so a mis-keyed projection can't get buried on an older page.
+        display_rows = conn.execute(
+            "SELECT * FROM transactions WHERE account_id=? AND txn_type='Projected' "
+            "ORDER BY txn_date ASC, id ASC",
+            (account_id,),
+        ).fetchall()
+        page, total_pages = 1, 1
+        offset = 0
+        first_shown = 1 if display_rows else 0
+        last_shown = len(display_rows)
+        shown_total = len(display_rows)
+    else:
+        total_pages = max(1, (total_rows + PER_PAGE - 1) // PER_PAGE)
+        page = request.args.get("page", 1, type=int) or 1
+        page = max(1, min(page, total_pages))
+        offset = (page - 1) * PER_PAGE
+
+        display_rows = conn.execute(
+            "SELECT * FROM transactions WHERE account_id=? "
+            "ORDER BY txn_date DESC, id DESC LIMIT ? OFFSET ?",
+            (account_id, PER_PAGE, offset),
+        ).fetchall()
+        first_shown = offset + 1 if total_rows else 0
+        last_shown = min(offset + PER_PAGE, total_rows)
+        shown_total = total_rows
+
+    projected_summary = conn.execute(
+        "SELECT COUNT(*) c, COALESCE(SUM(amount), 0) s FROM transactions "
+        "WHERE account_id=? AND txn_type='Projected'",
+        (account_id,),
+    ).fetchone()
 
     match_ids = [r["matched_projected_id"] for r in display_rows if r["matched_projected_id"]]
     match_lookup = {}
@@ -483,9 +508,12 @@ def account_page(account_id):
         categories=CATEGORIES,
         page=page,
         total_pages=total_pages,
-        total_rows=total_rows,
-        first_shown=offset + 1 if total_rows else 0,
-        last_shown=min(offset + PER_PAGE, total_rows),
+        total_rows=shown_total,
+        first_shown=first_shown,
+        last_shown=last_shown,
+        view=view,
+        projected_count=projected_summary["c"],
+        projected_total=projected_summary["s"],
     )
 
 
@@ -611,6 +639,8 @@ def delete_transaction(txn_id):
     else:
         flash("Only Projected rows can be deleted here.", "error")
     conn.close()
+    if request.form.get("view") == "projected":
+        return redirect(url_for("account_page", account_id=account_id, view="projected"))
     return redirect(url_for("account_page", account_id=account_id))
 
 
