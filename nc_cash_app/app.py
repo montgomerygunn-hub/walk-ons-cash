@@ -35,6 +35,10 @@ CATEGORIES = ["Sales", "COGS", "Payroll", "Vendor/AP", "Construction/CapEx",
 # a possible match for the user to confirm rather than silently merged.
 MATCH_WINDOW_DAYS = 21
 
+# Number of transactions shown per page on the account screen. Older
+# transactions are reached with the Newer / Older page controls.
+PER_PAGE = 100
+
 SCHEMA_VERSION = "3"
 
 # ---------------------------------------------------------------------------
@@ -438,9 +442,16 @@ def account_page(account_id):
         running += r["amount"]
         running_by_id[r["id"]] = running
 
+    total_rows = len(all_rows)
+    total_pages = max(1, (total_rows + PER_PAGE - 1) // PER_PAGE)
+    page = request.args.get("page", 1, type=int) or 1
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * PER_PAGE
+
     display_rows = conn.execute(
-        "SELECT * FROM transactions WHERE account_id=? ORDER BY txn_date DESC, id DESC LIMIT 100",
-        (account_id,),
+        "SELECT * FROM transactions WHERE account_id=? "
+        "ORDER BY txn_date DESC, id DESC LIMIT ? OFFSET ?",
+        (account_id, PER_PAGE, offset),
     ).fetchall()
 
     match_ids = [r["matched_projected_id"] for r in display_rows if r["matched_projected_id"]]
@@ -470,6 +481,11 @@ def account_page(account_id):
         accounts=accounts,
         current_account=acct,
         categories=CATEGORIES,
+        page=page,
+        total_pages=total_pages,
+        total_rows=total_rows,
+        first_shown=offset + 1 if total_rows else 0,
+        last_shown=min(offset + PER_PAGE, total_rows),
     )
 
 

@@ -39,6 +39,8 @@
   .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .upload-box { border: 2px dashed #1F4E78; border-radius: 8px; padding: 24px; text-align: center; }
   a.manage-link { font-size: 13px; color: var(--blue); }
+  .pager { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; color: #555; flex-wrap: wrap; }
+  .pager .btn.disabled { background: #bbb; pointer-events: none; cursor: default; }
 </style>
 </head>
 <body>
@@ -122,7 +124,17 @@
   </div>
 
   <div class="card">
-    <h3>Recent Transactions — {{ current_account.name }}</h3>
+    <h3>Transactions — {{ current_account.name }}</h3>
+    {% macro pager() %}
+    <div class="pager">
+      <a class="btn small secondary {{ 'disabled' if page <= 1 else '' }}"
+         href="{{ url_for('account_page', account_id=current_account.id, page=page-1) if page > 1 else '#' }}">&larr; Newer</a>
+      <span>Showing {{ first_shown }}&ndash;{{ last_shown }} of {{ total_rows }} &middot; Page {{ page }} of {{ total_pages }}</span>
+      <a class="btn small secondary {{ 'disabled' if page >= total_pages else '' }}"
+         href="{{ url_for('account_page', account_id=current_account.id, page=page+1) if page < total_pages else '#' }}">Older &rarr;</a>
+    </div>
+    {% endmacro %}
+    {{ pager() }}
     <table>
       <thead>
         <tr>
@@ -167,6 +179,7 @@
         {% endfor %}
       </tbody>
     </table>
+    {{ pager() }}
   </div>
 
 </div>
