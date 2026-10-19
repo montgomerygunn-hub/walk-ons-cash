@@ -98,7 +98,7 @@
       <div class="grid">
         <div>
           <label>Date</label>
-          <input type="date" name="txn_date" required>
+          <input type="date" name="txn_date" id="txn_date" required>
         </div>
         <div>
           <label>Payee / Payor</label>
@@ -202,6 +202,22 @@
   </div>
 
 </div>
+<script>
+  // Prefill the Add Transaction date with today's date in the browser's local time zone.
+  (function () {
+    var el = document.getElementById('txn_date');
+    if (!el) return;
+    function setToday() {
+      var d = new Date();
+      var mm = String(d.getMonth() + 1).padStart(2, '0');
+      var dd = String(d.getDate()).padStart(2, '0');
+      el.value = d.getFullYear() + '-' + mm + '-' + dd;
+    }
+    setToday();
+    // Refresh if the page is restored from the back/forward cache on a later day.
+    window.addEventListener('pageshow', function (e) { if (e.persisted) setToday(); });
+  })();
+</script>
 </body>
 </html>
 
